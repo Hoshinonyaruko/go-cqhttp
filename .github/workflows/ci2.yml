@@ -1,0 +1,69 @@
+name: CI2
+
+on: [push, pull_request,workflow_dispatch]
+
+env:
+  BINARY_PREFIX: "go-cqhttp_"
+  BINARY_SUFFIX: ""
+  COMMIT_ID: "${{ github.sha }}"
+  PR_PROMPT: "::warning:: Build artifact will not be uploaded due to the workflow is trigged by pull request."
+
+jobs:
+  build:
+    name: Build binary CI
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: android
+            goarch: arm64
+            cgo: 1
+            cc: aarch64-linux-android21-clang
+            cxx: aarch64-linux-android21-clang++
+          - goos: linux
+            goarch: "386"
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: "386"
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+      fail-fast: true
+    steps:
+      - uses: actions/checkout@v3
+      - name: Setup Go environment
+        uses: actions/setup-go@v3
+        with:
+          cache: true
+          go-version: '1.20'
+      - name: Setup NDK
+        if: matrix.goos == 'android'
+        run: |
+          curl -LO https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.zip
+          unzip android-ndk-r21e-linux-x86_64.zip
+          echo "${PWD}/android-ndk-r21e/toolchains/llvm/prebuilt/linux-x86_64/bin/" >> $GITHUB_PATH
+          rm android-ndk-r21e-linux-x86_64.zip
+      - name: Setup CGO variables for Android
+        if: matrix.goos == 'android'
+        run: |
+          echo "CGO_ENABLED=${{ matrix.cgo }}" >> $GITHUB_ENV
+          echo "CC=${{ matrix.cc }}" >> $GITHUB_ENV
+          echo "CXX=${{ matrix.cxx }}" >> $GITHUB_ENV
+      - name: Build binary file
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          IS_PR: ${{ !!github.head_ref }}
+        run: |
+          if [ $GOOS = "windows" ]; then export BINARY_SUFFIX="$BINARY_SUFFIX.exe"; fi
+          if $IS_PR ; then echo $PR_PROMPT; fi
+          export BINARY_NAME="$BINARY_PREFIX"$GOOS"_$GOARCH$BINARY_SUFFIX"
+          go build -o "output/$BINARY_NAME" -trimpath -ldflags "$LD_FLAGS" .
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        if: ${{ !github.head_ref }}
+        with:
+          name: ${{ matrix.goos }}_${{ matrix.goarch }}
+          path: output/
