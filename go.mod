@@ -2,6 +2,8 @@ module github.com/Mrs4s/go-cqhttp
 
 go 1.20
 
+replace github.com/Mrs4s/MiraiGo => ./MiraiGo
+
 require (
 	github.com/FloatTech/sqlite v1.6.3
 	github.com/Microsoft/go-winio v0.6.2-0.20230724192519-b29bbd58a65a

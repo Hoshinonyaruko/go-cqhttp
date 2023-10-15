@@ -42,9 +42,20 @@ _✨ 基于 [Mirai](https://github.com/mamoe/mirai) 以及 [MiraiGo](https://git
   <a href="https://github.com/Mrs4s/go-cqhttp/blob/master/CONTRIBUTING.md">参与贡献</a>
 </p>
 
-## 重要信息
-由于QQ官方针对协议库的围追堵截, 不断更新加密方案, 我们已无力继续维护此项目.
-建议Bot开发者尽快迁移至无头NTQQ项目 -> https://github.com/Mrs4s/go-cqhttp/issues/2471
+## 特性
+这个仓库的gocq,不再进行登录,而是使用gocq的正向ws功能,来进行事件转发,
+
+简而言之,使用这个gocq替换原有的失效的gocq,并设置一个正向ws地址,
+
+你可以用新的符合OnebotV11协议的客户端为这个gocq注入生命力,
+
+原有的连接,比如gocq连接的nonebot2和koishi或者其他onebot应用端,都不受影响!
+
+包括但不限于chronocat\shamrock\KookOneBot\QQGuild-cqhttp....
+
+你可以将任何平台的机器人SDK转化为Onebotv11标准的ws客户端来与本项目交互!
+
+只要是完整实现了onebotv11的,都可以!
 
 ## 兼容性
 go-cqhttp 兼容 [OneBot-v11](https://github.com/botuniverse/onebot-11) 绝大多数内容，并在其基础上做了一些扩展，详情请看 go-cqhttp 的文档。

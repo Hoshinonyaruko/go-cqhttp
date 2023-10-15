@@ -2,18 +2,23 @@ package server
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
+	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Mrs4s/MiraiGo/utils"
 	"github.com/RomiChan/websocket"
 	log "github.com/sirupsen/logrus"
@@ -25,7 +30,11 @@ import (
 	"github.com/Mrs4s/go-cqhttp/modules/api"
 	"github.com/Mrs4s/go-cqhttp/modules/config"
 	"github.com/Mrs4s/go-cqhttp/modules/filter"
-	"github.com/Mrs4s/go-cqhttp/pkg/onebot"
+)
+
+var (
+	once     sync.Once
+	instance *webSocketServer
 )
 
 type webSocketServer struct {
@@ -57,6 +66,8 @@ type wsConn struct {
 	mu        sync.Mutex
 	conn      *websocket.Conn
 	apiCaller *api.Caller
+	//新增
+	currentEcho string
 }
 
 func (c *wsConn) WriteText(b []byte) error {
@@ -131,14 +142,92 @@ func init() {
 	})
 }
 
-// runWSServer 运行一个正向WS server
+// // runWSServer 运行一个正向WS server
+// func runWSServer(b *coolq.CQBot, node yaml.Node) {
+// 	var conf WebsocketServer
+// 	switch err := node.Decode(&conf); {
+// 	case err != nil:
+// 		log.Warn("读取正向Websocket配置失败 :", err)
+// 		fallthrough
+// 	case conf.Disabled:
+// 		return
+// 	}
+
+//		network, address := "tcp", conf.Address
+//		if conf.Address == "" && (conf.Host != "" || conf.Port != 0) {
+//			log.Warn("正向 Websocket 使用了过时的配置格式，请更新配置文件")
+//			address = fmt.Sprintf("%s:%d", conf.Host, conf.Port)
+//		} else {
+//			uri, err := url.Parse(conf.Address)
+//			if err == nil && uri.Scheme != "" {
+//				network = uri.Scheme
+//				address = uri.Host + uri.Path
+//			}
+//		}
+//		s := &webSocketServer{
+//			bot:    b,
+//			conf:   &conf,
+//			token:  conf.AccessToken,
+//			filter: conf.Filter,
+//		}
+//		filter.Add(s.filter)
+//		s.handshake = fmt.Sprintf(`{"_post_method":2,"meta_event_type":"lifecycle","post_type":"meta_event","self_id":%d,"sub_type":"connect","time":%d}`,
+//			b.Client.Uin, time.Now().Unix())
+//		b.OnEventPush(s.onBotPushEvent)
+//		mux := http.ServeMux{}
+//		mux.HandleFunc("/event", s.event)
+//		mux.HandleFunc("/api", s.api)
+//		mux.HandleFunc("/", s.any)
+//		listener, err := net.Listen(network, address)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		log.Infof("CQ WebSocket 服务器已启动: %v", listener.Addr())
+//		log.Fatal(http.Serve(listener, &mux))
+//	}
+
+func newWebSocketServer(b *coolq.CQBot, conf *WebsocketServer) *webSocketServer {
+	s := &webSocketServer{
+		bot:       b,
+		conf:      conf,
+		token:     conf.AccessToken,   // 假设AccessToken在WebsocketServer配置中
+		filter:    conf.Filter,        // 假设Filter在WebsocketServer配置中
+		eventConn: make([]*wsConn, 0), // 初始化WebSocket连接切片
+	}
+
+	s.handshake = fmt.Sprintf(
+		`{"_post_method":2,"meta_event_type":"lifecycle","post_type":"meta_event","self_id":%d,"sub_type":"connect","time":%d}`,
+		b.Client.Uin,
+		time.Now().Unix(),
+	)
+
+	return s
+}
+
+// InitializeWebSocketServerInstance initializes the singleton instance with the provided configuration.
+func InitializeWebSocketServerInstance(b *coolq.CQBot, conf *WebsocketServer) *webSocketServer {
+	once.Do(func() {
+		instance = newWebSocketServer(b, conf)
+	})
+	return instance
+}
+
+// GetWebSocketServerInstance retrieves the singleton instance, assuming it has been initialized.
+func GetWebSocketServerInstance() *webSocketServer {
+	if instance == nil {
+		log.Fatal("Tried to get the WebSocketServer instance before it was initialized.")
+	}
+	return instance
+}
+
 func runWSServer(b *coolq.CQBot, node yaml.Node) {
 	var conf WebsocketServer
-	switch err := node.Decode(&conf); {
-	case err != nil:
+	if err := node.Decode(&conf); err != nil {
 		log.Warn("读取正向Websocket配置失败 :", err)
-		fallthrough
-	case conf.Disabled:
+		return
+	}
+
+	if conf.Disabled {
 		return
 	}
 
@@ -153,20 +242,20 @@ func runWSServer(b *coolq.CQBot, node yaml.Node) {
 			address = uri.Host + uri.Path
 		}
 	}
-	s := &webSocketServer{
-		bot:    b,
-		conf:   &conf,
-		token:  conf.AccessToken,
-		filter: conf.Filter,
-	}
+
+	// 初始化全局单例
+	s := InitializeWebSocketServerInstance(b, &conf)
+
 	filter.Add(s.filter)
 	s.handshake = fmt.Sprintf(`{"_post_method":2,"meta_event_type":"lifecycle","post_type":"meta_event","self_id":%d,"sub_type":"connect","time":%d}`,
 		b.Client.Uin, time.Now().Unix())
 	b.OnEventPush(s.onBotPushEvent)
+
 	mux := http.ServeMux{}
 	mux.HandleFunc("/event", s.event)
 	mux.HandleFunc("/api", s.api)
 	mux.HandleFunc("/", s.any)
+
 	listener, err := net.Listen(network, address)
 	if err != nil {
 		log.Fatal(err)
@@ -441,23 +530,227 @@ func (s *webSocketServer) any(w http.ResponseWriter, r *http.Request) {
 	s.listenAPI(conn)
 }
 
+type DynamicInt64 int64
+
+type WebSocketMessage struct {
+	PostType    string       `json:"post_type"`
+	MessageType string       `json:"message_type"`
+	Time        DynamicInt64 `json:"time"`
+	SelfID      DynamicInt64 `json:"self_id"`
+	SubType     string       `json:"sub_type"`
+	Sender      struct {
+		Age      int          `json:"age"`
+		Card     string       `json:"card"`
+		Nickname string       `json:"nickname"`
+		Role     string       `json:"role"`
+		UserID   DynamicInt64 `json:"user_id"`
+	} `json:"sender"`
+	UserID         DynamicInt64 `json:"user_id"`
+	MessageID      DynamicInt64 `json:"message_id"`
+	GroupID        DynamicInt64 `json:"group_id"`
+	MessageContent interface{}  `json:"message"`
+	MessageSeq     DynamicInt64 `json:"message_seq"`
+	RawMessage     string       `json:"raw_message"`
+	Echo           string       `json:"echo,omitempty"`
+}
+
+// 新增
+type BasicMessage struct {
+	Echo string          `json:"echo"`
+	Data json.RawMessage `json:"data"`
+}
+
+var md5Int64Mapping = make(map[int64]string)
+var md5Int64MappingLock sync.Mutex
+
+func (d *DynamicInt64) UnmarshalJSON(b []byte) error {
+	var n int64
+	var s string
+
+	// 首先尝试解析为字符串
+	if err := json.Unmarshal(b, &s); err == nil {
+		// 如果解析成功，再尝试将字符串解析为int64
+		n, err = strconv.ParseInt(s, 10, 64)
+		if err != nil { // 如果是非数字字符串
+			// 进行 md5 处理
+			hashed := md5.Sum([]byte(s))
+			hexString := hex.EncodeToString(hashed[:])
+
+			// 去除字母并取前15位
+			numericPart := strings.Map(func(r rune) rune {
+				if unicode.IsDigit(r) {
+					return r
+				}
+				return -1
+			}, hexString)
+
+			if len(numericPart) < 15 {
+				return fmt.Errorf("哈希过短: %s", numericPart)
+			}
+
+			n, err = strconv.ParseInt(numericPart[:15], 10, 64)
+			if err != nil {
+				return err
+			}
+
+			// 更新映射，但限制锁的范围
+			md5Int64MappingLock.Lock()
+			md5Int64Mapping[n] = s
+			md5Int64MappingLock.Unlock()
+		}
+	} else {
+		// 如果字符串解析失败，再尝试解析为int64
+		if err := json.Unmarshal(b, &n); err != nil {
+			return err
+		}
+	}
+
+	*d = DynamicInt64(n)
+	return nil
+}
+
+func (d DynamicInt64) ToInt64() int64 {
+	return int64(d)
+}
+
+func (d DynamicInt64) ToString() string {
+	return strconv.FormatInt(int64(d), 10)
+}
+
+// func parseEcho(echo string) (string, string) {
+// 	parts := strings.SplitN(echo, ":", 2)
+// 	if len(parts) == 2 {
+// 		return parts[0], parts[1]
+// 	}
+// 	return echo, ""
+// }
+
+// 假设 wsmsg.Message 是一个字符串，包含了形如 [CQ:at=xxxx] 的数据
+func extractAtElements(str string) []*message.AtElement {
+	re := regexp.MustCompile(`\[CQ:at=(\d+)\]`) // 正则表达式匹配[CQ:at=xxxx]其中xxxx是数字
+	matches := re.FindAllStringSubmatch(str, -1)
+
+	var elements []*message.AtElement
+	for _, match := range matches {
+		if len(match) == 2 {
+			target, err := strconv.ParseInt(match[1], 10, 64) // 转化xxxx为int64
+			if err != nil {
+				continue // 如果转化失败，跳过此次循环
+			}
+			elements = append(elements, &message.AtElement{
+				Target: target,
+				// 如果有 Display 和 SubType 的信息，也可以在这里赋值
+			})
+		}
+	}
+	return elements
+}
+
+// 正向ws收信息的地方
 func (s *webSocketServer) listenAPI(c *wsConn) {
+	// 在这里是gocq作为服务端收到信息的地方, shamrock上报事件
 	defer func() { _ = c.Close() }()
 	for {
 		buffer := global.NewBuffer()
 		t, reader, err := c.conn.NextReader()
 		if err != nil {
+			log.Println(err)
 			break
 		}
 		_, err = buffer.ReadFrom(reader)
 		if err != nil {
+			log.Println(err)
 			break
 		}
 
 		if t == websocket.TextMessage {
 			go func(buffer *bytes.Buffer) {
 				defer global.PutBuffer(buffer)
-				c.handleRequest(s.bot, buffer.Bytes())
+				data := buffer.Bytes()
+
+				// 打印收到的消息
+				log.Println("gocq正向ws服务器收到信息:", string(data))
+
+				// 初步解析为 BasicMessage
+				var basicMsg BasicMessage
+				err = json.Unmarshal(data, &basicMsg)
+				if err != nil {
+					log.Println("Failed to parse basic message:", err)
+					return
+				}
+
+				// 解析消息为 WebSocketMessage
+				var wsmsg WebSocketMessage
+				err = json.Unmarshal(data, &wsmsg)
+				if err != nil {
+					log.Println("Failed to parse message:", err)
+					return
+				}
+
+				// 存储 echo
+				c.currentEcho = wsmsg.Echo
+
+				// 处理解析后的消息
+				if wsmsg.MessageType == "group" {
+					g := &message.GroupMessage{
+						Id:        int32(wsmsg.MessageSeq),
+						GroupCode: wsmsg.GroupID.ToInt64(),
+						GroupName: wsmsg.Sender.Card,
+						Sender: &message.Sender{
+							Uin:      wsmsg.Sender.UserID.ToInt64(),
+							Nickname: wsmsg.Sender.Nickname,
+							CardName: wsmsg.Sender.Card,
+							IsFriend: false,
+						},
+						Time:           int32(wsmsg.Time),
+						OriginalObject: nil,
+					}
+					if MessageContent, ok := wsmsg.MessageContent.(string); ok {
+						// 替换字符串中的"\/"为"/"
+						MessageContent = strings.Replace(MessageContent, "\\/", "/", -1)
+						// 使用extractAtElements函数从wsmsg.Message中提取At元素
+						atElements := extractAtElements(MessageContent)
+						// 将提取的At元素和文本元素都添加到g.Elements
+						g.Elements = append(g.Elements, &message.TextElement{Content: MessageContent})
+						for _, elem := range atElements {
+							g.Elements = append(g.Elements, elem)
+						}
+					} else if contentArray, ok := wsmsg.MessageContent.([]interface{}); ok {
+						for _, contentInterface := range contentArray {
+							contentMap, ok := contentInterface.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							contentType, ok := contentMap["type"].(string)
+							if !ok {
+								continue
+							}
+
+							switch contentType {
+							case "text":
+								text, ok := contentMap["data"].(map[string]interface{})["text"].(string)
+								if ok {
+									// 替换字符串中的"\/"为"/"
+									text = strings.Replace(text, "\\/", "/", -1)
+									g.Elements = append(g.Elements, &message.TextElement{Content: text})
+								}
+							case "at":
+								if data, ok := contentMap["data"].(map[string]interface{}); ok {
+									if qqData, ok := data["qq"].(float64); ok {
+										qq := strconv.Itoa(int(qqData))
+										atText := fmt.Sprintf("[CQ:at,qq=%s]", qq)
+										g.Elements = append(g.Elements, &message.TextElement{Content: atText})
+									}
+								}
+							}
+						}
+					}
+					fmt.Println("准备c.GroupMessageEvent.dispatch(c, g)")
+					fmt.Printf("%+v\n", g)
+					// 使用 dispatch 方法
+					s.bot.Client.GroupMessageEvent.Dispatch(s.bot.Client, g)
+				}
 			}(buffer)
 		} else {
 			global.PutBuffer(buffer)
@@ -476,30 +769,33 @@ func (c *wsConn) handleRequest(_ *coolq.CQBot, payload []byte) {
 	j := gjson.Parse(utils.B2S(payload))
 	t := strings.TrimSuffix(j.Get("action").Str, "_async")
 	params := j.Get("params")
-	log.Debugf("WS接收到API调用: %v 参数: %v", t, params.Raw)
-	ret := c.apiCaller.Call(t, onebot.V11, params)
-	if j.Get("echo").Exists() {
-		ret["echo"] = j.Get("echo").Value()
-	}
+	log.Warnf("gocq反向WS接收到API调用: %v 参数: %v", t, params.Raw)
+	// ret := c.apiCaller.Call(t, onebot.V11, params)
+	// if j.Get("echo").Exists() {
+	// 	ret["echo"] = j.Get("echo").Value()
+	// }
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_ = c.conn.SetWriteDeadline(time.Now().Add(time.Second * 15))
-	writer, err := c.conn.NextWriter(websocket.TextMessage)
-	if err != nil {
-		log.Errorf("无法响应API调用(连接已断开?): %v", err)
-		return
-	}
-	_ = json.NewEncoder(writer).Encode(ret)
-	_ = writer.Close()
+	// c.mu.Lock()
+	// defer c.mu.Unlock()
+	// _ = c.conn.SetWriteDeadline(time.Now().Add(time.Second * 15))
+	// writer, err := c.conn.NextWriter(websocket.TextMessage)
+	// if err != nil {
+	// 	log.Errorf("无法响应API调用(连接已断开?): %v", err)
+	// 	return
+	// }
+	// _ = json.NewEncoder(writer).Encode(ret)
+	// _ = writer.Close()
+
+	// 直接将原始payload传递给onBotPushEvent_函数处理
+	// 获取webSocketServer的单例实例
+	server := GetWebSocketServerInstance()
+
+	// 调用单例实例中的方法
+	server.onBotPushEvent_(payload)
 }
 
-func (s *webSocketServer) onBotPushEvent(e *coolq.Event) {
-	flt := filter.Find(s.filter)
-	if flt != nil && !flt.Eval(gjson.Parse(e.JSONString())) {
-		log.Debugf("上报Event %s 到 WS客户端 时被过滤.", e.JSONBytes())
-		return
-	}
+func (s *webSocketServer) onBotPushEvent_(payload []byte) {
+	// 删除所有与 coolq.Event 相关的代码，因为我们不再处理它
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -507,18 +803,47 @@ func (s *webSocketServer) onBotPushEvent(e *coolq.Event) {
 	j := 0
 	for i := 0; i < len(s.eventConn); i++ {
 		conn := s.eventConn[i]
-		log.Debugf("向WS客户端推送Event: %s", e.JSONBytes())
-		if err := conn.WriteText(e.JSONBytes()); err != nil {
+		log.Errorf("gocq正向ws服务端向WS客户端转发action: %s", payload)
+		if err := conn.WriteText(payload); err != nil { // 直接发送原始 payload
 			_ = conn.Close()
 			conn = nil
 			continue
 		}
 		if i != j {
-			// i != j means that some connection has been closed.
-			// use an in-place removal to avoid copying.
+			// i != j意味着某些连接已经关闭。
+			// 使用就地删除以避免复制。
 			s.eventConn[j] = conn
 		}
 		j++
 	}
 	s.eventConn = s.eventConn[:j]
+}
+
+func (s *webSocketServer) onBotPushEvent(e *coolq.Event) {
+	// flt := filter.Find(s.filter)
+	// if flt != nil && !flt.Eval(gjson.Parse(e.JSONString())) {
+	// 	log.Debugf("上报Event %s 到 WS客户端 时被过滤.", e.JSONBytes())
+	// 	return
+	// }
+
+	// s.mu.Lock()
+	// defer s.mu.Unlock()
+
+	// j := 0
+	// for i := 0; i < len(s.eventConn); i++ {
+	// 	conn := s.eventConn[i]
+	// 	log.Debugf("向WS客户端推送Event: %s", e.JSONBytes())
+	// 	if err := conn.WriteText(e.JSONBytes()); err != nil {
+	// 		_ = conn.Close()
+	// 		conn = nil
+	// 		continue
+	// 	}
+	// 	if i != j {
+	// 		// i != j means that some connection has been closed.
+	// 		// use an in-place removal to avoid copying.
+	// 		s.eventConn[j] = conn
+	// 	}
+	// 	j++
+	// }
+	// s.eventConn = s.eventConn[:j]
 }

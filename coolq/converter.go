@@ -7,7 +7,6 @@ import (
 	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Mrs4s/MiraiGo/topic"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/Mrs4s/go-cqhttp/global"
 )
@@ -94,33 +93,37 @@ func (bot *CQBot) formatGroupMessage(m *message.GroupMessage) *event {
 		gm["sender"].(global.MSG)["nickname"] = "匿名消息"
 		typ = "message/group/anonymous"
 	} else {
-		group := bot.Client.FindGroup(m.GroupCode)
-		mem := group.FindMember(m.Sender.Uin)
-		if mem == nil {
-			log.Warnf("获取 %v 成员信息失败，尝试刷新成员列表", m.Sender.Uin)
-			t, err := bot.Client.GetGroupMembers(group)
-			if err != nil {
-				log.Warnf("刷新群 %v 成员列表失败: %v", group.Uin, err)
-				return nil
-			}
-			group.Members = t
-			mem = group.FindMember(m.Sender.Uin)
-			if mem == nil {
-				return nil
-			}
-		}
+		//group := bot.Client.FindGroup(m.GroupCode)
+		//mem := group.FindMember(m.Sender.Uin)
+		//log.Warnf("获取成员信息: %v", mem)
+		// if mem == nil {
+		// 	log.Warnf("获取 %v 成员信息失败，尝试刷新成员列表", m.Sender.Uin)
+		// 	t, err := bot.Client.GetGroupMembers(group)
+		// 	if err != nil {
+		// 		log.Warnf("刷新群 %v 成员列表失败: %v", group.Uin, err)
+		// 		return nil
+		// 	}
+		// 	group.Members = t
+		// 	mem = group.FindMember(m.Sender.Uin)
+		// 	if mem == nil {
+		// 		return nil
+		// 	}
+		// }
 		ms := gm["sender"].(global.MSG)
 		role := "member"
-		switch mem.Permission { // nolint:exhaustive
-		case client.Owner:
-			role = "owner"
-		case client.Administrator:
-			role = "admin"
-		}
+		// switch mem.Permission { // nolint:exhaustive
+		// case client.Owner:
+		// 	role = "owner"
+		// case client.Administrator:
+		// 	role = "admin"
+		// }
 		ms["role"] = role
-		ms["nickname"] = mem.Nickname
-		ms["card"] = mem.CardName
-		ms["title"] = mem.SpecialTitle
+		// ms["nickname"] = mem.Nickname
+		// ms["card"] = mem.CardName
+		// ms["title"] = mem.SpecialTitle
+		ms["nickname"] = "昵称"
+		ms["card"] = "群名片"
+		ms["title"] = "头衔"
 	}
 	ev := bot.event(typ, gm)
 	ev.Time = int64(m.Time)
