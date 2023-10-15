@@ -57,6 +57,21 @@ _✨ 基于 [Mirai](https://github.com/mamoe/mirai) 以及 [MiraiGo](https://git
 
 只要是完整实现了onebotv11的,都可以!
 
+用法,
+
+新增一个正向ws配置,然后,用符合onebotv11标准的协议端,如shamrock连接,
+
+原有的反向ws保持不变!
+
+```
+  # 正向WS设置
+  - ws:
+      # 正向WS服务器监听地址
+      address: 正向ws地址,格式192.168.0.1:1234 0.0.0.0:15630(示范)
+      middlewares:
+        <<: *default # 引用默认中间件
+```
+
 ## 兼容性
 go-cqhttp 兼容 [OneBot-v11](https://github.com/botuniverse/onebot-11) 绝大多数内容，并在其基础上做了一些扩展，详情请看 go-cqhttp 的文档。
 
