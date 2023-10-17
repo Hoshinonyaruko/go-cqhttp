@@ -286,10 +286,11 @@ func LoginInteract() {
 	// 		}
 	// 	}
 	// }
-	if base.Account.Uin != 0 && base.PasswordHash != [16]byte{} {
-		cli.Uin = base.Account.Uin
-		cli.PasswordMd5 = base.PasswordHash
-	}
+	//if base.Account.Uin != 0 && base.PasswordHash != [16]byte{} {
+	cli.Uin = base.Account.Uin
+	log.Infof("载入成功 欢迎使用: %d", cli.Uin)
+	//cli.PasswordMd5 = base.PasswordHash
+	//}
 	// download.SetTimeout(time.Duration(base.HTTPTimeout) * time.Second)
 	// if !base.FastStart {
 	// 	log.Infof("正在检查协议更新...")
@@ -377,7 +378,7 @@ func LoginInteract() {
 	// })
 	//saveToken()
 	cli.AllowSlider = true
-	log.Infof("载入成功 欢迎使用: %v", cli.Nickname)
+	//log.Infof("载入成功 欢迎使用: %v", cli.Nickname)
 	//log.Info("开始加载好友列表...")
 	//global.Check(cli.ReloadFriendList(), true)
 	//log.Infof("共加载 %v 个好友.", len(cli.FriendList))
@@ -391,6 +392,9 @@ func LoginInteract() {
 	servers.Run(coolq.NewQQBot(cli))
 	log.Info("资源初始化完成, 开始处理信息.")
 	log.Info("アトリは、高性能ですから!")
+	log.Info("本gocq版本不再包含登录部分,变成一个转接器,问题询问群:670078416")
+	log.Info("功能:可以将多个反向ws变成1个,过滤,显示日志,需要设置正向ws地址,并可以使用符合onebotv11的协议端作为客户端连接.")
+	log.Info("可以对每个反向ws设置不一样的token,并且可以将wss反向连接转化为ws连接.")
 }
 
 // WaitSignal 在新线程检查更新和网络并等待信号, 必须在 InitBase, PrepareData, LoginInteract 之后执行

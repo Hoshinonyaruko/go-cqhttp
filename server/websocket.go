@@ -331,6 +331,7 @@ func (c *websocketClient) connect(typ, addr string, conptr **wsConn) {
 		"X-Self-ID":     []string{strconv.FormatInt(c.bot.Client.Uin, 10)},
 		"User-Agent":    []string{"CQHttp/4.15.0"},
 	}
+	log.Infof("请求头:%s", header)
 	if c.token != "" {
 		header["Authorization"] = []string{"Token " + c.token}
 	}
@@ -750,6 +751,69 @@ func (s *webSocketServer) listenAPI(c *wsConn) {
 					fmt.Printf("%+v\n", g)
 					// 使用 dispatch 方法
 					s.bot.Client.GroupMessageEvent.Dispatch(s.bot.Client, g)
+				}
+				if wsmsg.MessageType == "private" {
+					pMsg := &message.PrivateMessage{
+						Id:         int32(wsmsg.MessageID),
+						InternalId: 0,
+						Self:       wsmsg.SelfID.ToInt64(),
+						Target:     wsmsg.Sender.UserID.ToInt64(),
+						Time:       int32(wsmsg.Time),
+						Sender: &message.Sender{
+							Uin:      wsmsg.Sender.UserID.ToInt64(),
+							Nickname: wsmsg.Sender.Nickname,
+							CardName: "", // Private message might not have a Card
+							IsFriend: true,
+						},
+					}
+
+					if MessageContent, ok := wsmsg.MessageContent.(string); ok {
+						// 替换字符串中的"\/"为"/"
+						MessageContent = strings.Replace(MessageContent, "\\/", "/", -1)
+						// 使用extractAtElements函数从wsmsg.Message中提取At元素
+						atElements := extractAtElements(MessageContent)
+						// 将提取的At元素和文本元素都添加到g.Elements
+						pMsg.Elements = append(pMsg.Elements, &message.TextElement{Content: MessageContent})
+						for _, elem := range atElements {
+							pMsg.Elements = append(pMsg.Elements, elem)
+						}
+					} else if contentArray, ok := wsmsg.MessageContent.([]interface{}); ok {
+						for _, contentInterface := range contentArray {
+							contentMap, ok := contentInterface.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							contentType, ok := contentMap["type"].(string)
+							if !ok {
+								continue
+							}
+
+							switch contentType {
+							case "text":
+								text, ok := contentMap["data"].(map[string]interface{})["text"].(string)
+								if ok {
+									// 替换字符串中的"\/"为"/"
+									text = strings.Replace(text, "\\/", "/", -1)
+									pMsg.Elements = append(pMsg.Elements, &message.TextElement{Content: text})
+								}
+							case "at":
+								if data, ok := contentMap["data"].(map[string]interface{}); ok {
+									if qqData, ok := data["qq"].(float64); ok {
+										qq := strconv.Itoa(int(qqData))
+										atText := fmt.Sprintf("[CQ:at,qq=%s]", qq)
+										pMsg.Elements = append(pMsg.Elements, &message.TextElement{Content: atText})
+									}
+								}
+							}
+						}
+					}
+					selfIDStr := strconv.FormatInt(int64(wsmsg.SelfID), 10)
+					if selfIDStr == strconv.FormatInt(int64(wsmsg.Sender.UserID), 10) {
+						s.bot.Client.SelfPrivateMessageEvent.Dispatch(s.bot.Client, pMsg)
+					} else {
+						s.bot.Client.PrivateMessageEvent.Dispatch(s.bot.Client, pMsg)
+					}
 				}
 			}(buffer)
 		} else {
