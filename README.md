@@ -51,7 +51,7 @@ _✨ 基于 [Mirai](https://github.com/mamoe/mirai) 以及 [MiraiGo](https://git
 
 原有的连接,比如gocq连接的nonebot2和koishi或者其他onebot应用端,都不受影响!
 
-包括但不限于chronocat\shamrock\KookOneBot\QQGuild-cqhttp....
+包括但不限于KookOneBot\QQ官方api全域适配器(开发中)....
 
 你可以将任何平台的机器人SDK转化为Onebotv11标准的ws客户端来与本项目交互!
 
